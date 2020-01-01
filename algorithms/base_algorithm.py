@@ -1,8 +1,11 @@
 import abc
+import traceback
 from typing import Union, List, Iterable, Dict, Type
 
 import gbvision as gbv
 import gbrpi
+
+from exceptions.algorithm_incomplete import AlgorithmIncomplete
 
 
 class BaseAlgorithm(abc.ABC):
@@ -18,17 +21,26 @@ class BaseAlgorithm(abc.ABC):
                 f'duplicated entry for algorithm_name {cls.algorithm_name}: {other_cls.__name__} and {cls.__name__}')
         BaseAlgorithm.__registered[cls.algorithm_name] = cls
 
-    def __init__(self, output_key: Union[str, List[str]], conn: gbrpi.TableConn):
+    def __init__(self, output_key: Union[str, List[str]], error_key: str, conn: gbrpi.TableConn,
+                 log_algorithm_incomplete=False):
         self.output_key = output_key
+        self.success_key = error_key
         self.conn = conn
+        self.log_algorithm_incomplete = log_algorithm_incomplete
 
     def __call__(self, frame: gbv.Frame, camera: gbv.Camera):
-        values = self._process(frame, camera)
-        if type(self.output_key) is str:
-            self.conn.set(self.output_key, values)
-        else:
-            for i, value in enumerate(values):
-                self.conn.set(self.output_key[i], value)
+        try:
+            values = self._process(frame, camera)
+            self.conn.set(self.success_key, True)
+            if type(self.output_key) is str:
+                self.conn.set(self.output_key, values)
+            else:
+                for i, value in enumerate(values):
+                    self.conn.set(self.output_key[i], value)
+        except AlgorithmIncomplete:
+            self.conn.set(self.success_key, False)
+            if self.log_algorithm_incomplete:
+                traceback.print_exc()
 
     @abc.abstractmethod
     def _process(self, frame: gbv.Frame, camera: gbv.Camera) -> Union[

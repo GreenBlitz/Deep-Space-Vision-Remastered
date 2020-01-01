@@ -3,6 +3,7 @@ import numpy as np
 
 from constants import CONTOUR_MIN_AREA
 from constants.distances import TARGETS_DISTANCE, TARGETS_MAX_ERROR
+from exceptions.algorithm_incomplete import AlgorithmIncomplete
 from .base_algorithm import BaseAlgorithm
 import gbvision as gbv
 from constants.thresholds import VISION_TARGET_THRESHOLD
@@ -15,8 +16,8 @@ class TargetAlgorithm(BaseAlgorithm):
     RIGHT = 'right'
     MIDDLE = 'middle'
 
-    def __init__(self, output_key: str):
-        BaseAlgorithm.__init__(self, output_key)
+    def __init__(self, output_key: str, success_key: str, conn: gbrpi.TableConn, log_algorithm_incomplete=False):
+        BaseAlgorithm.__init__(self, output_key, success_key, conn, log_algorithm_incomplete)
         self.finder = gbv.RotatedRectFinder(VISION_TARGET_THRESHOLD, VISION_TARGET, contour_min_area=CONTOUR_MIN_AREA)
         self.continuity_tracker = gbv.ContinuesShapeWrapper([], None, self.finder.find_shapes,
                                                             gbv.ContinuesShapeWrapper.SHAPE_TYPE_ROTATED_RECT,
@@ -87,11 +88,13 @@ class TargetAlgorithm(BaseAlgorithm):
                                            max(-1, min(1, (distances[0][2] - distances[1][2]) / (
                                                    TARGETS_DISTANCE * 2))))])))
 
-    def _process(self, frame: gbv.Frame, camera: gbv.Camera, conn: gbrpi.TableConn):
+    def _process(self, frame: gbv.Frame, camera: gbv.Camera):
         shapes = self.continuity_tracker.find_shapes(frame)
         shapes = self.pair_shapes(shapes, camera)
+        if len(shapes) == 0:
+            raise AlgorithmIncomplete()
 
-        direction = conn.get('focus')
+        direction = self.conn.get('focus')
 
         if direction != self.direction:
             self.direction = direction
@@ -111,12 +114,16 @@ class TargetAlgorithm(BaseAlgorithm):
                 if distances[i][0] < direction[key][0]:
                     key = i
                     break
+            else:
+                raise AlgorithmIncomplete()
 
         elif direction == self.RIGHT:
             for i in distances:
                 if distances[i][0] > direction[key][0]:
                     key = i
                     break
+            else:
+                raise AlgorithmIncomplete()
 
         for i in distances:
             if distances[i] == distances[key]:  # could be two (for left and right)
